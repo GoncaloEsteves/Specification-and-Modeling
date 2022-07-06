@@ -1,0 +1,23 @@
+sig Sala {
+	curso : set Curso,
+	edificio : set Edificio
+}
+
+sig Edificio {}
+sig Curso {}
+
+pred spec {
+  // adivinhe as restrições deste modelo
+  
+  //Cada sala está apenas num edifício
+  all s : Sala | one (s.edificio)
+  
+  //Cada sala está diponível para apenas um curso
+  all s : Sala | lone (s.curso)
+  
+  //Todos os cursos têm salas
+  all c : Curso | some (c.(~curso))
+  
+  //Todas as salas de um mesmo curso estão no mesmo edifício
+  all c : Curso | one ((c.(~curso)).edificio)
+}

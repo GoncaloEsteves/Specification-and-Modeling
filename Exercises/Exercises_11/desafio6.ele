@@ -1,0 +1,99 @@
+// Modelo do jantar dos filósofos
+
+// As "coisas" à volta da mesa
+abstract sig Coisa {
+	prox : one Coisa
+}
+
+sig Filosofo extends Coisa {
+	// Garfos que cada filósofo tem na mão
+	var garfos : set Garfo
+}
+
+sig Garfo extends Coisa {}
+
+fact Mesa {
+	// A mesa é redonda, ou seja, as coisas formam um anel
+	all c : Coisa | Coisa in c.^prox
+	// Os garfos e os filósofos estão intercalados
+	all c : Coisa | c in Filosofo iff c.prox in Garfo
+}
+
+// Especifique os seguintes eventos
+
+// Um filosofo pode comer se já tiver os dois garfos junto a si
+// e pousa os garfos depois
+pred come [f : Filosofo] {
+	//O filosofo tem ambos os garfos no presente estado
+	f.prox in f.garfos
+	f.(~prox) in f.garfos
+
+	//O filosofo nao tem nenhum garfo no estado seguinte
+	no f.garfos'
+
+	//Tudo o resto fica igual no proximo estado
+	prox = prox'
+	all f : (Filosofo-f) | f.garfos = f.garfos'
+}
+
+// Um filósofo pode pegar num dos garfos que estejam
+// pousados junto a si
+pred pega [f : Filosofo] {
+	//Pelo menos um dos garfos nao pode estar atribuido a nenhum filosofo
+	no (f.prox.(~garfos)) or no (f.(~prox).(~garfos))
+	//O filosofo tem no maximo um dos garfos em sua posse
+	lone ((f.garfos & f.prox) + (f.garfos & f.(~prox)))
+
+	//Se ambos os garfos tiverem livres, um deles fica com o filosofo no estado seguinte
+	(no (f.prox.(~garfos)) and no (f.(~prox).(~garfos))) implies ((f.prox in f.garfos' or f.(~prox) in f.garfos'))
+	//Se um dado garfo esta livre e o outro nao, entao o garfo livre fica com o filosofo no proximo estado
+	(no (f.prox.(~garfos)) and some (f.(~prox).(~garfos))) implies ((f.prox in f.garfos'))
+	(some (f.prox.(~garfos)) and no (f.(~prox).(~garfos))) implies ((f.(~prox) in f.garfos'))
+
+	//O filosofo mantem os garfos que tinha
+	f.garfos in f.garfos'
+	//Apenas um novo garfo e adicionado
+	one (f.garfos' - f.garfos)
+
+	//Tudo o resto fica igual no proximo estado
+	prox = prox'
+	all f : (Filosofo-f) | f.garfos = f.garfos'
+}
+
+// Para além de comer ou pegar em garfos os filósofos podem pensar
+pred pensa [f : Filosofo] {
+	//Tudo fica igual
+	garfos' = garfos
+	prox' = prox
+}
+
+fact Comportamento {
+	// No inicio os garfos estão todos pousados
+	no garfos
+	// Depois os filósfos só podem comer, pegar ou pensar
+	always (some f : Filosofo | come[f] or pega[f] or pensa[f])
+}
+
+// Especifique as seguintes propriedades
+
+assert GarfosNaMao {
+	// O mesmo garfo nunca pode estar na mão de dois filósofos
+	always all g : Garfo | lone g.~garfos
+}
+check GarfosNaMao for 6
+
+assert SempreQuePegaCome {
+	// Qualquer filósofo que pega num garfo vai conseguir comer
+	always all f : Filosofo | some f.garfos implies eventually come[f]
+}
+check SempreQuePegaCome for 6
+
+assert SemBloqueio {
+	// O sistema não pode bloquear numa situação em só é possível pensar
+}
+check SemBloqueio for 6
+
+// Especifique um cenário com 4 filósofos onde todos conseguem comer
+run Exemplo {
+	all f : Filosofo | eventually come[f]
+} for 8 Coisa, exactly 4 Filosofo, 20 steps

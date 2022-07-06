@@ -1,0 +1,456 @@
+/***********************************************************************************
+   Alloy specification of Lamport's distributed mutual-exclusion algorithm
+   that appeared as an example in
+   L. Lamport:  Time, Clocks and the Ordering of Events in a Distributed
+   System. CACM 21(7):558-565, 1978.
+***********************************************************************************/
+
+open util/ordering[Clock]
+
+/*Instead of giving values to each processes clock,
+we'll use different clocks to assign different periods in time,
+so ordering messages can be possible*/
+sig Clock {}
+
+//Different types of messages that exist
+abstract sig MessageType {}
+
+one sig ReqMessage, AckMessage, RelMessage extends MessageType {}
+
+//Messages used in the algorithm
+var sig Message {
+	//Local clock of the process that sent the message,
+	//at the moment of sending (will only be used by requests)
+	var mclock : lone Clock,
+	//Type of the message
+	var type : one MessageType
+}
+
+//Processes that want to enter the critical section
+sig Process {
+	//Local clock of each process
+	var pclock : one Clock,
+	//Processes that requested to enter into the critical section
+	//and the clock transmitted with request
+	var requests : set Process -> Clock,
+	//Acknowledgements received from processes
+	//recognising the request sent by the process
+	var ack : set Process,
+	//Messages sent to the process but not yet received
+	var network : set Process -> Message
+}
+
+//Processes in critical section
+var sig Critical in Process {}
+
+/*----------------------------------------------------------------------------------------------------------------------------------------------------------------*/
+//All request messages
+fun ReqMessages : set Message {
+	{ m : Message | m.type = ReqMessage }
+}
+
+//All ack messages
+fun RelMessages : set Message {
+	{ m : Message | m.type = RelMessage }
+}
+
+//All release messages
+fun AckMessages : set Message {
+	{ m : Message | m.type = AckMessage }
+}
+
+/*----------------------------------------------------------------------------------------------------------------------------------------------------------------*/
+
+/*Beats(p,q) is true if process p believes that its request has higher
+priority than q's request. This is true if either p has not received a
+request from q or p's request has a "earlier" clock value than q's.
+If there is a tie, p's request is prioritized*/
+pred Beats [p, q : Process] {
+	//p received no request from q
+	(no (q.(p.requests)))
+	or
+	//there are at least 2 different requests, in which
+	(
+		//one was sent from p to himself (in order to save the clock 
+		//when the request it sent was made)
+		(one (p.(p.requests)))
+		and
+		//the other was sent from q to p
+		(one (q.(p.requests)))
+		and
+		//p sent the message prior to q
+		(lte[p.(p.requests), q.(p.requests)])
+	)
+}
+
+//Broadcast a message: send it to all processes except the sender
+pred Broadcast [s : Process, m : Message] {
+	//All process except s should have one new message on the network to them
+	all p : (Process - s) | p.network' = p.network + s->m
+	//The sender must not have new messages
+	s.network' = s.network
+}
+
+//Process p requests access to critical section
+pred Request [p : Process] {
+	//There are no previous requests made from p
+	no (p.(p.requests))
+
+	//There's only one new request accepted, which is the one sent from p to himself
+	requests' = requests + p->(p->p.pclock)
+
+	//There will be one new request message created,
+	//with the same clock as process p 
+	let m = { aux : (Message' - Message) | aux.type' = ReqMessage and aux.mclock' = p.pclock } {
+		//There will only be one new message created
+		one m
+		//The rest of the messages still exist
+		Message' = Message + m
+		//Broadcasting the request to every other process
+		Broadcast[p, m]
+	}
+
+	//p acknowledges its own request
+	p.ack' = p
+
+	//The rest remains the same
+	pclock' = pclock
+	Critical' = Critical
+	//All processes that are not p have no new ack's
+	all q : (Process - p) | q.ack' = q.ack
+	//There will be a new message, but the previous ones must stay equal
+	all m : Message | m.mclock' = m.mclock and m.type' = m.type
+}
+
+//Returns the request messages sent from q to p
+fun GetReqMessage [p, q : Process] : set Message {
+	{ aux : (q.(p.network)) | aux.type = ReqMessage }
+}
+
+//Process p receives a request from q and acknowledges it
+pred ReceiveRequest [p, q : Process] {
+	//Processes must be different
+	p != q
+	//q must have sent request messages to p
+	some (q.(p.network).type & ReqMessage)
+
+	//Getting the request messages sent from q
+	let m = GetReqMessage[p, q] {
+		//There must only exist one request message sent from q
+		one m
+
+		//There's only one new recognised request,
+		//which is the one sent from q to p 
+		requests' = requests + p->(q->m.mclock)
+
+		//In case the process p clock its older then the message's clock (sent from q),
+		//the process clock is updated, in order for it to be the next one after the message's
+		(lt[p.pclock, m.mclock]) implies (p.pclock' = m.mclock.next)
+		//In case the process p clock its younger then the message's clock,
+		//the process clock is updated, in order for it to be the next one after the process
+		(gte[p.pclock, m.mclock]) implies (p.pclock' = p.pclock.next)
+
+		//There will be one new ack message created, with no clock
+		let n = { aux : (Message' - Message) | aux.type' = AckMessage and no (aux.mclock') } {
+			//There will only be one new message created
+			one n
+			//The request sent from q to p is no longer in the network,
+			//but there is one new ack message sent from p to q
+			network' = (network - p->(q->m)) + q->(p->n)
+
+			//If there are no longer any processes that need to receive message m
+			//then it is deleted, keeping the rest of the messages and adding n
+			(no (Process.network' :> m)) implies (
+				(Message' = (Message - m) + n)
+			)
+			//If there are still processes that need to receive message m,
+			//then all messages are kept and n is added
+			(some (Process.network' :> m)) implies (
+				(Message' = Message + n) and
+				//m stays the same
+				(m.type' = m.type and m.mclock' = m.mclock)
+			)
+		}
+
+		//All messages except m aren't modified
+		all n2 : (Message - m) | n2.type' = n2.type and n2.mclock' = n2.mclock
+	}
+
+	//The rest remains the same
+	ack' = ack
+	Critical' = Critical
+	//All processes except p aren't modified
+	all p2 : (Process - p) | p2.requests' = p2.requests and p2.pclock' = p2.pclock
+}
+
+//Returns the ack messages sent from q to p
+fun GetAckMessage [p, q : Process] : set Message {
+	{ aux : (q.(p.network)) | aux.type = AckMessage }
+}
+
+//Process p receives an acknowledgement from q
+pred ReceiveAck [p, q : Process] {
+	//Processes must be different
+	p != q
+	//q must have sent ack messages to p
+	some (q.(p.network).type & AckMessage)
+
+	//Getting the ack messages sent from q
+	let m = GetAckMessage[p, q] {
+		//There must only exist one ack message sent from q		
+		one m
+		//There's only one new recognised ack,
+		//which is the one sent from q to p 
+		ack' = ack + p->q
+
+		//The ack sent from q to p is no longer in the network
+		network' = network - p->(q->m)
+
+		//If there are no longer any processes that need to receive message m
+		//then it is deleted, keeping the rest of the messages
+		(no (Process.network' :> m)) implies (
+			(Message' = Message - m)	
+		)
+		//If there are still processes that need to receive message m,
+		//then all messages are kept
+		(some (Process.network' :> m)) implies (
+			(Message' = Message) and
+			//m stays the same
+			(m.type' = m.type and m.mclock' = m.mclock)
+		)
+
+		//All messages except m aren't modified
+		all n : (Message - m) | n.type' = n.type and n.mclock' = n.mclock
+	}
+		
+	//The rest remains the same
+	pclock' = pclock
+	requests' = requests
+	Critical' = Critical
+}
+
+//Returns the release messages sent from q to p
+fun GetRelMessage [p, q : Process] : set Message {
+	{ aux : (q.(p.network)) | aux.type = RelMessage }
+}
+
+//Process p receives a release notification from q
+pred ReceiveRelease [p, q : Process]{
+	//Processes must be different
+	p != q
+	//q must have sent messages to p
+	some (q.(p.network).type & RelMessage)
+
+	//Getting the release messages sent from q
+	let m = GetRelMessage[p, q] {
+		//There must only exist one release message sent from q
+		one m
+		//The release sent from q to p is no longer in the network
+		network' = network - p->(q->m)
+
+		//If there are no longer any processes that need to receive message m
+		//then it is deleted, keeping the rest of the messages
+		(no (Process.network' :> m)) implies (
+			(Message' = Message - m)	
+		)
+		//If there are still processes that need to receive message m,
+		//then all messages are kept
+		(some (Process.network' :> m)) implies (
+			(Message' = Message) and
+			//m stays the same
+			(m.type' = m.type and m.mclock' = m.mclock)
+		)
+
+		//All messages except m aren't modified
+		all n : (Message - m) | n.type' = n.type and n.mclock' = n.mclock
+	}
+
+	//Removes the request sent from q to p
+	requests' = requests - p->(q->(q.(p.requests)))
+		
+	//The rest remains the same
+	pclock' = pclock
+	ack' = ack
+	Critical' = Critical
+}
+
+//Process p enters the critical section
+pred Enter [p : Process] {
+	//There are no processes in the critical section
+	no Critical
+
+	//All processes answered to p's request
+	p.ack = Process
+
+	//p has priority over all other processes
+	all q : (Process - p) | Beats[p, q]
+
+	//p will enter the critical section
+	Critical' = p
+
+	//The rest remains the same
+	pclock' = pclock
+	requests' = requests
+	ack' = ack
+	network' = network
+	mclock' = mclock
+	type' = type
+}
+
+//Process p exits the critical section and notifies other processes
+pred Exit [p : Process] {
+	//p is in the critical section
+	Critical = p
+
+	//the critical section will be empty next
+	no Critical'
+
+	//There will be one new release message created, with no clock
+	let m = { aux : (Message' - Message) | aux.type' = RelMessage and no (aux.mclock') } {
+		//There must only exist one new release message
+		one m
+		//The rest of the messages still exist		
+		Message' = Message + m
+		//Broadcasting the release to every other process
+		Broadcast[p, m]
+	}
+
+	//Removes the request sent from p to himself
+	p.requests' = p.requests - (p->(p.(p.requests)))
+
+	//Removes all the ack that process p has
+	no p.ack'
+
+	//The rest remains the same
+	pclock' = pclock
+	//All the other processes ack's stay the same
+	all q : (Process - p) | q.ack' = q.ack and  q.requests' = q.requests
+	//There will be a new message, but the previous ones must stay equal
+	all m : Message | m.mclock' = m.mclock and m.type' = m.type
+}
+
+//Nothing happens
+pred skip {
+	mclock' = mclock
+	type' = type
+	pclock' = pclock
+	requests' = requests
+	ack' = ack
+	network' = network
+	Critical' = Critical
+}
+
+/*----------------------------------------------------------------------------------------------------------------------------------------------------------------*/
+
+//The initial state predicate
+fact Init {
+	//All processes have the same clock, which is the first one
+	//(ressembling the clocks being at 1)
+	no (pclock :> (Clock - first))
+
+	//There are no messages
+	no Message
+
+	//There are no requests nor acknowledges made
+	no requests
+	no ack
+
+	//There are no messages in the network
+	no network
+
+	//There are no processes in critical section
+	no Critical
+}
+
+//Determines what type of actions should happen
+fact Transitions {
+	//There is always one pre-determined action occuring
+	always (
+		//Everything stays the same or
+		skip or
+		//There is one process p that sends a request,
+		//enters or exists the critical section or 
+		(some p : Process | Request[p] or Enter[p] or Exit[p]) or
+		//There are two processes p and q so that
+		//p receives a request from q,
+		//p receives a ack from q or
+		//p receives a release from q
+		(some p : Process | some q : Process | ReceiveRequest[p, q] or ReceiveAck[p, q] or ReceiveRelease[p, q])
+	)
+}
+
+//Fairness conditions
+fact Fairness {
+	//In all states, if a process p
+	always all p : Process {
+		//makes a request, it will eventually enter the critical section
+		Request[p] implies (eventually Enter[p])
+		//enters the critical section, it will eventually exit it
+		Enter[p] implies (eventually Exit[p])
+	}
+}
+
+//There are no messages at the end of the execution
+fact NoMessages {
+	always eventually no Message
+}
+
+/*----------------------------------------------------------------------------------------------------------------------------------------------------------------*/
+
+//Describes the mutex property (safety property)
+//that says that there is always one or none process at the critical section
+assert Mutex {
+	always lone Critical
+}
+check Mutex
+
+//Describes properties that should force the model to do something
+assert Liveness {
+	//If there are processes and messages then eventually there will be processes at the critical section
+	(some Process and some Message) implies eventually some Critical
+}
+check Liveness
+
+//No channel ever contains more than one message of the same type
+assert BoundedNetwork {
+	always all p, q : Process {
+		//If the processes are the same then there are no messages at the network
+		(p = q implies no q.(p.network)) or
+		//If the processes aren't the same, then there is one or less messages
+		//from each type sent from q to p
+		(
+			(lone ((q.(p.network).type) & ReqMessage)) and
+			(lone ((q.(p.network).type) & AckMessage)) and
+			(lone ((q.(p.network).type) & RelMessage))
+		)
+	}
+}
+check BoundedNetwork
+
+/*----------------------------------------------------------------------------------------------------------------------------------------------------------------*/
+
+//Test using 2 processes, and making them both enter into the critical section
+run Process2AllCritical {
+	all p : Process | eventually p in Critical
+} for 15 steps, exactly 2 Process, exactly 2 Clock, 3 Message
+
+//Test using 2 processes, and making one of them enter into the critical section twice
+run Process2OneCriticalTwice {
+	(eventually one p : Process {
+		(p in Critical) and
+		after ((p not in Critical) and (eventually p in Critical))
+	})
+} for 15 steps, exactly 2 Process, exactly 3 Clock, 3 Message
+
+//Test using 3 processes, and making one of them enter into the critical section
+run Process3OneCritical {
+	some p : Process | eventually p in Critical
+} for exactly 3 Process, exactly 2 Clock, 3 Message
+
+/*Test using 3 processes, and two of them enter into the critical section
+(we made only 2 enter, because making 3 would take Electrum too much time,
+also, it's recomended to make this test with the "NoMessages" fact "off",
+since it will take 4 less steps to reach a solution and it doesn't affect the validation of the model)*/
+run Process3TwoCritical {
+	one p : Process | always (no (p & Critical))
+} for 20 steps, exactly 3 Process, exactly 3 Clock, 4 Message

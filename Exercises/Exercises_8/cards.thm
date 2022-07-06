@@ -1,0 +1,57 @@
+<?xml version="1.0"?>
+<alloy>
+
+<view>
+
+<defaultnode/>
+
+<defaultedge/>
+
+<node>
+   <type name="Card"/>
+   <type name="Int"/>
+   <type name="Status"/>
+   <type name="String"/>
+   <type name="univ"/>
+   <type name="seq/Int"/>
+</node>
+
+<node color="Blue">
+   <type name="Client"/>
+</node>
+
+<node showlabel="no" color="Green">
+   <set name="$cardsIssued" type="Card"/>
+</node>
+
+<node showlabel="no" color="Red">
+   <set name="$cardsCancelled" type="Card"/>
+</node>
+
+<node showlabel="no" color="White">
+   <set name="$cardsUnissued" type="Card"/>
+</node>
+
+<node visible="no">
+   <type name="Unissued"/>
+</node>
+
+<node visible="no" color="Green">
+   <type name="Issued"/>
+</node>
+
+<node visible="no" color="Red">
+   <type name="Cancelled"/>
+</node>
+
+<edge visible="no" attribute="no">
+   <relation name="status"> <type name="Card"/> <type name="Status"/> </relation>
+</edge>
+
+<edge visible="yes">
+   <relation name="cards"> <type name="Client"/> <type name="Card"/> </relation>
+</edge>
+
+</view>
+
+</alloy>

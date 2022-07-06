@@ -1,0 +1,42 @@
+<?xml version="1.0"?>
+<alloy>
+
+<view>
+
+<defaultnode/>
+
+<defaultedge/>
+
+<node>
+   <type name="Int"/>
+   <type name="String"/>
+   <type name="univ"/>
+   <type name="ordering/Ord"/>
+   <type name="seq/Int"/>
+</node>
+
+<node color="Blue">
+   <type name="Node"/>
+</node>
+
+<node color="Green">
+   <set name="$elected" type="Node"/>
+</node>
+
+<node hideunconnected="yes">
+   <type name="Id"/>
+</node>
+
+<edge visible="no" attribute="yes">
+   <relation name="id"> <type name="Node"/> <type name="Id"/> </relation>
+   <relation name="inbox"> <type name="Node"/> <type name="Id"/> </relation>
+   <relation name="outbox"> <type name="Node"/> <type name="Id"/> </relation>
+</edge>
+
+<edge visible="yes" attribute="no">
+   <relation name="succ"> <type name="Node"/> <type name="Node"/> </relation>
+</edge>
+
+</view>
+
+</alloy>
